@@ -1,0 +1,65 @@
+import zipfile
+import boto3
+import io
+from google.cloud import storage
+from google.cloud import bigquery
+import gc
+import gzip
+from google.cloud.bigquery import SchemaField
+from io import BytesIO, StringIO
+import csv
+
+from google.cloud.bigquery import SchemaField
+
+session = boto3.session.Session(
+    aws_access_key_id='AKIA5YELWPAIPS6G64ZX',
+    aws_secret_access_key='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'
+)
+
+aws_cost_update = session.resource('s3')
+bucket = aws_cost_update.Bucket('amabillingreport')
+client = bigquery.Client.from_service_account_json('/home/ec2-user/airflow/amanotes-analytics-7354a2a9496e.json')
+
+for obj in bucket.objects.filter():
+    if 'aws-billing-detailed-line-items-with-resources-and-tags' in obj.key:
+        with io.BytesIO(obj.get()['Body'].read()) as file:
+            # rewind the file
+            file.seek(0)
+            # Read the file as a zipfile and process the members
+            with zipfile.ZipFile(file, mode='r') as zipf:
+                for subfile in zipf.namelist():
+                    with zipf.open(subfile, mode='r') as myfile:
+                        content = myfile.read()
+                        file_out = BytesIO(content)
+                        file_out.seek(0)
+        schem = [
+                SchemaField('InvoiceID','STRING'),
+                SchemaField('PayerAccountId','INTEGER'),
+                SchemaField('LinkedAccountId','INTEGER'),
+                SchemaField('RecordType','STRING'),
+                SchemaField('RecordId','FLOAT'),
+                SchemaField('ProductName','STRING'),
+                SchemaField('RateId','INTEGER'),
+                SchemaField('SubscriptionId','INTEGER'),
+                SchemaField('PricingPlanId','INTEGER'),
+                SchemaField('UsageType','STRING'),
+                SchemaField('Operation','STRING'),
+                SchemaField('AvailabilityZone','STRING'),
+                SchemaField('ReservedInstance','BOOLEAN'),
+                SchemaField('ItemDescription','STRING'),
+                SchemaField('UsageStartDate','TIMESTAMP'),
+                SchemaField('UsageEndDate','TIMESTAMP'),
+                SchemaField('UsageQuantity','FLOAT'),
+                SchemaField('Rate','FLOAT'),
+                SchemaField('Cost','FLOAT'),
+                SchemaField('ResourceId','STRING')
+                ]
+        dataset = client.dataset('infrastructure_cost')
+        table = dataset.table('aws_cost')
+        job_config = bigquery.LoadJobConfig()
+        job_config.source_format = 'CSV'
+        job_config.write_disposition = 'WRITE_APPEND'
+        job_config.schema = schem
+        job_config.skip_leading_rows = 1
+        job_config.autodetect = False
+        client.load_table_from_file(file_out, table, job_config=job_config).result()
